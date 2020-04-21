@@ -3,12 +3,16 @@
 // V1.0
 // CopyRight : EvenTang MIT License
 //
+// @todo : how to mock functions with variadic parameter
+// @todo : how to mock template parameter
+
 
 #include <functional>
 #include <string>
 #include <map>
 #include <memory>
 #include <algorithm>
+#include <deque>
 
 class MockObj {
 public:
@@ -42,9 +46,7 @@ class FunctionMock;
 
 template <typename R, typename ...Args>
 class FunctionMock<R(Args...)> : public MockObj {
-
 public:
-    //  using ParameterPack = std::tuple<Args&&...>;
     using ParaPack = std::tuple<typename std::remove_const<typename std::remove_reference<Args>::type>::type...>;
 public:
     FunctionMock(std::string const& _name) 
@@ -60,23 +62,24 @@ public:
 
     R Call(Args ... _args) {
         m_is_called = true;
-        // store parameters
-        m_parameters = std::forward_as_tuple(std::forward<Args>(_args)...);
 
-        if (m_fun) {
-            return m_fun(_args...);
+        if (!m_customize_behaviors.empty()) {
+            auto temp = m_customize_behaviors.front();
+            m_customize_behaviors.pop_front();
+
+            return temp(_args...);
         }
         
         return m_default_behavior(_args...);
     }
 
-    std::tuple<Args...> GetAllParameters() {
-        return m_parameters;
+    FunctionMock<R(Args...)>& SetBehavior(std::function<R(Args...)> _checker) {
+        m_customize_behaviors.push_back(_checker);
+        return *this;
     }
 
-    FunctionMock<R(Args...)>& SetBehavior(std::function<R(Args...)> _checker) {
-        m_fun = _checker;
-        return *this;
+    FunctionMock<R(Args...)>& WillActLike(std::function<R(Args...)> _checker) {
+        return SetBehavior(_checker);
     }
 
     FunctionMock<R(Args...)>& SetDefaultBehavior(std::function<R(Args...)> _checker) {
@@ -84,45 +87,18 @@ public:
         return *this;
     }
 
-    bool IsCallWithParameters(Args... _args) {
-        auto check_items = std::make_tuple(_args...);
-        return check_items == m_parameters;
-    }
-
-    template <uint8_t Index, typename Arg>
-    bool IsCallWithParametersOf(Arg const& _arg) {
-        return _arg == std::get<Index - 1>(m_parameters);
-    }
-
-    //template <uint8_t Index, typename Arg>
-    //bool IsParameterMeets(std::function<bool(Arg const &)> _checker) {
-    //    return _checker(std::get<Index - 1>(m_parameters));
-    //}
-
-    template <uint8_t Index>
-    bool IsParameterMeets(std::function<bool(std::tuple_element_t<Index -1, ParaPack> const &)> _checker) {
-        return _checker(std::get<Index - 1>(m_parameters));
-    }
-
     virtual void ClearMockStatus(void) {
         MockObj::ClearMockStatus();
-        m_fun = nullptr;
+        m_customize_behaviors.clear();
     }
 
 private:
-    std::function<R(Args...)> m_fun;
+    std::deque<std::function<R(Args...)>> m_customize_behaviors;
     std::function<R(Args...)> m_default_behavior;
-
-    ParaPack m_parameters;
 };
 
 #define WillReturn(rslt) SetBehavior([&](auto ...args) { return rslt; })
 #define WillDefaultReturn(rslt) SetDefaultBehavior([&](auto ...args) { return rslt; })
-#define IsParameterOneMeets(cond)   IsParameterMeets<1>([&](auto const& _p1) { return (cond); })
-#define IsParameterTwoMeets(cond)   IsParameterMeets<2>([&](auto const& _p2) { return (cond); })
-#define IsParameterThreeMeets(cond) IsParameterMeets<3>([&](auto const& _p3) { return (cond); })
-#define IsParameterFourMeets(cond)  IsParameterMeets<4>([&](auto const& _p4) { return (cond); })
-#define IsParameterFiveMeets(cond)  IsParameterMeets<5>([&](auto const& _p5) { return (cond); })
 
 class MockSystem {
 public:
@@ -166,6 +142,32 @@ MockSystem::MockObjHandle CreateMock(std::string const _name) {
 #define MockFun(fun_name, signature) dynamic_cast<FunctionMock<signature>&>( \
         *MockSystem::GetInstance().FindMockObjByName(#fun_name))
 
+
+
+class PostAction {
+public:
+    PostAction(std::function<void()> _triggle, std::string _description)
+        : m_behavior(_triggle), m_str_name(_description)
+    {
+
+    }
+
+
+    ~PostAction() {
+        m_behavior();
+        MockSystem::GetInstance().RefreshMockSystem();
+        // std::cout << m_str_name << std::endl;
+    }
+
+private:
+    std::function<void()> m_behavior;
+    std::string m_str_name;
+
+};
+
+#define Action_LINENAME_CAT(name, line) name##line
+#define Action_LINENAME(name, line)     Action_LINENAME_CAT(name, line)
+#define ActionOf(expr)                  PostAction Action_LINENAME(PostAction, __LINE__)([&]() {expr;}, #expr)
 
 
 // sample

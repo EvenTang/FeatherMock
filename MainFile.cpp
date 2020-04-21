@@ -2,22 +2,39 @@
 #include "catch.hpp"
 
 #include "FeatherMock.h"
+#include "Dummy_AppLogger.h"
+
+
 
 struct Student {
 
     Student() {}
 
     Student const & operator = (Student const& _stu) {
+        name = _stu.name;
+        age = _stu.age;
         return *this;
     }
     bool operator == (Student const & _stu) const {
-        return true;
+        std::cout << "My name is " << name << " and Age is : " << age << std::endl;
+        std::cout << "His name is " << _stu.name << " and Age is : " << _stu.age << std::endl;
+        return (name == _stu.name) && (age == _stu.age);
     }
+
+  
 
 
     std::string name;
-    uint8_t     age;
+    uint16_t     age;
 };
+
+std::ostream& operator << (std::ostream& os, const Student& _stu) {
+    return os << _stu.name << _stu.age << "\n";
+}
+
+
+
+
 
 MockSystem::MockSystem()
 {
@@ -28,6 +45,7 @@ MockSystem::MockSystem()
     ADD_NEW_MOCK_OBJ("Api_from_other_module_5", void(Student const& _stu, int));
     ADD_NEW_MOCK_OBJ("Api_from_other_module_6", void(Student & _stu, int));
     ADD_NEW_MOCK_OBJ("Api_from_other_module_7", void(Student _stu, int));
+    ADD_NEW_MOCK_OBJ("Foo::SetName", void(std::string const &));
 }
 
 #define MockOf_Api_from_other_module_1 MockFun("Api_from_other_module_1", int(int, int))
@@ -37,38 +55,69 @@ MockSystem::MockSystem()
 #define MockOf_Api_from_other_module_5 MockFun("Api_from_other_module_5", void(Student const & _stu, int))
 #define MockOf_Api_from_other_module_6 MockFun("Api_from_other_module_6", void(Student & _stu, int))
 #define MockOf_Api_from_other_module_7 MockFun("Api_from_other_module_7", void(Student _stu, int))
+#define MockOf_Foo_SetName             MockFun("Foo::SetName",            void(std::string const &))
 
+#define NEW_FUNC_CALL_RECODER(...) MockFun(__FUNCTION__, int(int, int)).Call(__VA_ARGS__);
+
+//#define A_Mock(name) MockFun(#name, decltype(name)).Call
+#define MockOf(name) MockOf_##name
+
+#define FUNC_ENTRY(name) return MockOf(name).Call
+// or
+// #define FUNC_ENTRY(name) FUNC_CALL_RECODER(name)
+
+
+class Foo {
+public:
+    void SetName(std::string const& _name) {
+        FUNC_ENTRY(Foo_SetName)(_name);
+    }
+
+    std::string name;
+};
 
 int Api_from_other_module_1(int _p1, int _p2) {
-    return MockOf_Api_from_other_module_1.Call(_p1, _p2);
+
+    int z = 7;
+    ENSURE(_p1 != 2)(_p1)(_p2)(z).Msg("NONONONONO");
+    ENSURE(false).Msg("NONONONONO");
+
+   
+    FUNC_ENTRY(Api_from_other_module_1)(_p1, _p2);
+
+    
+
+
 }
 
 void Api_from_other_module_2(int _p1, int _p2) {
-    return MockOf_Api_from_other_module_2.Call(_p1, _p2);
+    FUNC_ENTRY(Api_from_other_module_2)(_p1, _p2);
 }
 
 void Api_from_other_module_3() {
-    return MockOf_Api_from_other_module_3.Call();
+    FUNC_ENTRY(Api_from_other_module_3)();
 }
 
 int Api_from_other_module_4() {
-    return MockOf_Api_from_other_module_4.Call();
+    FUNC_ENTRY(Api_from_other_module_4)();
 }
 
 void Api_from_other_module_5(Student const & _stu, int _i) {
-    return MockOf_Api_from_other_module_5.Call(_stu, _i);
+    FUNC_ENTRY(Api_from_other_module_5)(_stu, _i);
+    // ....
+    // ....
 }
 
 void Api_from_other_module_6(Student & _stu, int _i) {
-    return MockOf_Api_from_other_module_6.Call(_stu, _i);
+    FUNC_ENTRY(Api_from_other_module_6)(_stu, _i);
+
+    // ....Api_from_other_module_5(xx, yy)
+    // ....
 }
 
 void Api_from_other_module_7(Student _stu, int _i) {
-    return MockOf_Api_from_other_module_7.Call(_stu, _i);
+    FUNC_ENTRY(Api_from_other_module_7)(_stu, _i);
 }
-
-
-
 
 class Msg {
 public:
@@ -78,6 +127,7 @@ public:
 
 int TestTarget(Msg& _msg) {
 
+
     if (Api_from_other_module_1(2, 1) == 4) {
         return Api_from_other_module_4();
     }
@@ -85,51 +135,32 @@ int TestTarget(Msg& _msg) {
     Api_from_other_module_3();
 
     Student stu;
-    stu.age = 0;
+    stu.age = 3;
     stu.name = "King";
     Api_from_other_module_7(stu, 4);
 
-    return 5;
+    return 5;  
 }
 
 
 TEST_CASE("Dialing", "[Normal][Current]") {
 
-    int i = 5;
+    WHEN("Case 1") {
+        Msg msg;
+        msg.id = 3;
+        //ActionOf(CHECK(TestTarget(msg) == 4));
 
-    MockOf_Api_from_other_module_1.WillReturn(4);
-    MockOf_Api_from_other_module_4.WillDefaultReturn(i);
+        MockOf_Api_from_other_module_1.WillActLike([](auto _p1, auto _p2) {
+            REQUIRE(_p1 == 2);
+            return 4;
+        });
 
-    Msg msg1;
-    REQUIRE(TestTarget(msg1) == i);
+        MockOf_Api_from_other_module_4.WillActLike([]() {
+            return 4; 
+        });
 
-    REQUIRE(MockOf_Api_from_other_module_2.IsCalled() == false);
+        REQUIRE(TestTarget(msg) == 3);
 
-    MockSystem::GetInstance().RefreshMockSystem();
 
-    MockOf_Api_from_other_module_1.SetBehavior([](int _a, int) {
-        REQUIRE(_a == 2);
-        return 4;
-    });
-
-    Msg msg2;
-    REQUIRE(TestTarget(msg2) == i);
-    CHECK(MockOf_Api_from_other_module_2.IsCalled());
-
-    Student stu;
-    stu.age = 0;
-    stu.name = "King";
-
-    CHECK(MockOf_Api_from_other_module_1.IsCallWithParameters(2, 1));
-    CHECK(MockOf_Api_from_other_module_7.IsCallWithParameters(stu, 4));
-
-    CHECK(MockOf_Api_from_other_module_1.IsCallWithParametersOf<1>(2));
-    CHECK(MockOf_Api_from_other_module_7.IsCallWithParametersOf<1>(stu));
-
-    CHECK(MockOf_Api_from_other_module_1.IsParameterMeets<1>([](auto const& i) { return i > 0; }));
-    CHECK(MockOf_Api_from_other_module_1.IsParameterOneMeets(_p1 > 0));
-
-    CHECK(MockOf_Api_from_other_module_7.IsParameterMeets<1>([](auto const & _stu) { return _stu.name.size() > 3; }));
-    CHECK(MockOf_Api_from_other_module_7.IsParameterOneMeets(_p1.name.size() > 3));
-
+    }
 }
